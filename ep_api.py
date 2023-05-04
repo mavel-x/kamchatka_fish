@@ -31,13 +31,30 @@ def ep_token_generator():
         yield token
 
 
-def get_products(access_token):
+def get_all_products(access_token):
     products_url = 'https://api.moltin.com/pcm/products'
     headers = {'Authorization': f'Bearer {access_token}'}
     response = requests.get(products_url, headers=headers)
     response.raise_for_status()
     products_raw = response.json()
     return products_raw['data']
+
+
+def get_product(access_token, product_id):
+    url = f'https://api.moltin.com/pcm/products/{product_id}'
+    headers = {'Authorization': f'Bearer {access_token}'}
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    product_raw = response.json()
+    return product_raw['data']
+
+
+def get_image_url(access_token, image_id):
+    url = f'https://api.moltin.com/v2/files/{image_id}'
+    headers = {'Authorization': f'Bearer {access_token}'}
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    return response.json()['data']['link']['href']
 
 
 def get_cart_items(access_token, customer_id):
@@ -50,7 +67,7 @@ def get_cart_items(access_token, customer_id):
     return response.json()
 
 
-def add_item(access_token, customer_id):
+def add_item_to_cart(access_token, customer_id, product_id, quantity):
     url = f'https://api.moltin.com/v2/carts/{customer_id}/items'
     headers = {
         'Authorization': f'Bearer {access_token}',
@@ -58,9 +75,9 @@ def add_item(access_token, customer_id):
     }
     payload = {
         'data': {
-            'sku': 1001,
+            'id': product_id,
             'type': 'cart_item',
-            'quantity': 1
+            'quantity': int(quantity)
         }
     }
     response = requests.post(url, headers=headers, json=payload)

@@ -14,49 +14,95 @@ from telegram.ext import Updater, Filters, CallbackContext
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 
-from ep_api import get_products, ep_token_generator
+from ep_api import get_all_products, get_product, get_image_url, ep_token_generator, add_item_to_cart
 
 _database = None
 ep_token = ep_token_generator()
 
 
+def get_database_connection():
+    """Возвращает конекшн с базой данных Redis, либо создаёт новый, если он ещё не создан.
+    """
+    global _database
+    if _database is None:
+        env = Env()
+        env.read_env()
+        database_password = env.str("DATABASE_PASSWORD")
+        database_host = env.str("DATABASE_HOST")
+        database_port = env.int("DATABASE_PORT")
+        _database = redis.Redis(host=database_host, port=database_port, password=database_password)
+    return _database
+
+
 def start(update: Update, context: CallbackContext):
     main_menu_button = InlineKeyboardButton('Купить рыбу', callback_data='fish_menu')
     reply_markup = InlineKeyboardMarkup.from_button(main_menu_button)
-    update.message.reply_text(text='Привет!', reply_markup=reply_markup)
+    update.message.reply_text(text='Kamchatka Fish:\nГлавное меню', reply_markup=reply_markup)
     return StateFunction.MAIN_MENU.name
 
 
 def main_menu(update: Update, context: CallbackContext):
     update.callback_query.answer()
-    user_selection = update.callback_query.data
-    if user_selection == 'fish_menu':
+    choice = update.callback_query.data
+    if choice == 'fish_menu':
         return fish_menu(update, context)
 
 
 def fish_menu(update: Update, context: CallbackContext):
     ep_access_token = next(ep_token)
-    products = get_products(ep_access_token)
+    products = get_all_products(ep_access_token)
     keyboard = [
         [InlineKeyboardButton(product['attributes']['name'], callback_data=product['id'])]
         for product in products
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.effective_chat.send_message(text='Выбери рыбу:', reply_markup=reply_markup)
-    return StateFunction.CHOOSING.name
+    return StateFunction.HANDLE_MENU.name
 
 
-def echo_choice(update: Update, context: CallbackContext):
+def fish_description(update: Update, context: CallbackContext):
+    update.callback_query.answer()
     choice = update.callback_query.data
-    update.effective_chat.send_message(choice)
-    return StateFunction.CHOOSING.name
+    ep_access_token = next(ep_token)
+    product = get_product(ep_access_token, product_id=choice)
+    image_id = product['relationships']['main_image']['data']['id']
+    image_url = get_image_url(ep_access_token, image_id=image_id)
+    description = (f'{product["attributes"]["name"]}\n\n'
+                   f'{product["attributes"]["description"]}')
+    keyboard = [
+        [
+            InlineKeyboardButton(f'{num_kg} кг', callback_data=f'{choice}:{num_kg}')
+            for num_kg in [1, 5, 10]
+        ],
+        [InlineKeyboardButton('Назад', callback_data='fish_menu')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    update.effective_chat.send_photo(image_url, caption=description, reply_markup=reply_markup)
+    context.bot.delete_message(chat_id=update.effective_chat.id, message_id=update.effective_message.message_id)
+    return StateFunction.HANDLE_DESCRIPTION.name
+
+
+def handle_description(update: Update, context: CallbackContext):
+    choice = update.callback_query.data
+    if choice == 'fish_menu':
+        return fish_menu(update, context)
+    product_id, quantity = choice.split(':')
+    ep_access_token = next(ep_token)
+    add_item_to_cart(
+        access_token=ep_access_token,
+        customer_id=update.effective_user.id,
+        product_id=product_id,
+        quantity=quantity,
+    )
+    update.callback_query.answer(f'{quantity} кг добавлено в корзину.')
+    return StateFunction.HANDLE_DESCRIPTION.name
 
 
 class StateFunction(Enum):
     START = partial(start)
     MAIN_MENU = partial(main_menu)
-    FISH_MENU = partial(fish_menu)
-    CHOOSING = partial(echo_choice)
+    HANDLE_MENU = partial(fish_description)
+    HANDLE_DESCRIPTION = partial(handle_description)
 
 
 def handle_users_reply(update: Update, context: CallbackContext):
@@ -77,7 +123,6 @@ def handle_users_reply(update: Update, context: CallbackContext):
         user_reply = update.message.text
         chat_id = update.message.chat_id
     elif update.callback_query:
-        update.callback_query.answer()
         user_reply = update.callback_query.data
         chat_id = update.callback_query.message.chat_id
     else:
@@ -90,20 +135,6 @@ def handle_users_reply(update: Update, context: CallbackContext):
     state_handler = StateFunction[user_state].value
     next_state = state_handler(update, context)
     db.set(chat_id, next_state)
-
-
-def get_database_connection():
-    """Возвращает конекшн с базой данных Redis, либо создаёт новый, если он ещё не создан.
-    """
-    global _database
-    if _database is None:
-        env = Env()
-        env.read_env()
-        database_password = env.str("DATABASE_PASSWORD")
-        database_host = env.str("DATABASE_HOST")
-        database_port = env.int("DATABASE_PORT")
-        _database = redis.Redis(host=database_host, port=database_port, password=database_password)
-    return _database
 
 
 def main():
