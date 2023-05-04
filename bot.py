@@ -14,7 +14,7 @@ from telegram.ext import Updater, Filters, CallbackContext
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 
-from ep_api import get_all_products, get_product, get_image_url, ep_token_generator, add_item_to_cart
+from ep_api import get_all_products, get_product, get_image_url, ep_token_generator, add_item_to_cart, get_cart_items
 
 _database = None
 ep_token = ep_token_generator()
@@ -49,24 +49,34 @@ def main_menu(update: Update, context: CallbackContext):
 
 
 def fish_menu(update: Update, context: CallbackContext):
-    ep_access_token = next(ep_token)
-    products = get_all_products(ep_access_token)
+    update.callback_query.answer()
+    access_token = next(ep_token)
+    products = get_all_products(access_token)
     keyboard = [
         [InlineKeyboardButton(product['attributes']['name'], callback_data=product['id'])]
         for product in products
     ]
+    keyboard.append([InlineKeyboardButton('Корзина', callback_data='cart')])
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.effective_chat.send_message(text='Выбери рыбу:', reply_markup=reply_markup)
     return StateFunction.HANDLE_MENU.name
 
 
+def handle_menu(update: Update, context: CallbackContext):
+    update.callback_query.answer()
+    if update.callback_query.data == 'cart':
+        return cart(update, context)
+    else:
+        return fish_description(update, context)
+
+
 def fish_description(update: Update, context: CallbackContext):
     update.callback_query.answer()
     choice = update.callback_query.data
-    ep_access_token = next(ep_token)
-    product = get_product(ep_access_token, product_id=choice)
+    access_token = next(ep_token)
+    product = get_product(access_token, product_id=choice)
     image_id = product['relationships']['main_image']['data']['id']
-    image_url = get_image_url(ep_access_token, image_id=image_id)
+    image_url = get_image_url(access_token, image_id=image_id)
     description = (f'{product["attributes"]["name"]}\n\n'
                    f'{product["attributes"]["description"]}')
     keyboard = [
@@ -87,9 +97,9 @@ def handle_description(update: Update, context: CallbackContext):
     if choice == 'fish_menu':
         return fish_menu(update, context)
     product_id, quantity = choice.split(':')
-    ep_access_token = next(ep_token)
+    access_token = next(ep_token)
     add_item_to_cart(
-        access_token=ep_access_token,
+        access_token=access_token,
         customer_id=update.effective_user.id,
         product_id=product_id,
         quantity=quantity,
@@ -98,11 +108,46 @@ def handle_description(update: Update, context: CallbackContext):
     return StateFunction.HANDLE_DESCRIPTION.name
 
 
+def handle_cart(update: Update, context: CallbackContext):
+    if update.callback_query.data == 'fish_menu':
+        update.effective_message.delete()
+        return fish_menu(update, context)
+    # TODO remove items here
+    return cart(update, context)
+
+
+def format_cart_message(cart_items: dict):
+    cart_total = cart_items["meta"]["display_price"]["with_tax"]["formatted"]
+    message_text = '\n'.join(
+        [f'{product["name"]}\n'
+         f'{product["quantity"]} кг в корзине '
+         f'на сумму {product["meta"]["display_price"]["with_tax"]["value"]["formatted"]}\n'
+         for product in cart_items['data']]
+    )
+    message_text += f'\nВсего товаров на сумму {cart_total}'
+    return message_text
+
+
+def cart(update: Update, context: CallbackContext):
+    access_token = next(ep_token)
+    cart_items = get_cart_items(access_token, customer_id=update.effective_user.id)
+    message_text = format_cart_message(cart_items)
+    keyboard = [
+        [InlineKeyboardButton(f'Убрать {product["name"]}', callback_data=product['id'])]
+        for product in cart_items['data']
+    ]
+    keyboard.append([InlineKeyboardButton('Обратно в меню', callback_data='fish_menu')])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    update.effective_message.edit_text(message_text, reply_markup=reply_markup)
+    return StateFunction.HANDLE_CART.name
+
+
 class StateFunction(Enum):
     START = partial(start)
     MAIN_MENU = partial(main_menu)
-    HANDLE_MENU = partial(fish_description)
+    HANDLE_MENU = partial(handle_menu)
     HANDLE_DESCRIPTION = partial(handle_description)
+    HANDLE_CART = partial(handle_cart)
 
 
 def handle_users_reply(update: Update, context: CallbackContext):
