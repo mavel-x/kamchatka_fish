@@ -14,10 +14,12 @@ def get_access_token(client_id, client_secret):
     }
     response = requests.post(access_url, data=data)
     response.raise_for_status()
-    return response.json()['access_token']
+    return response.json()
 
 
 def ep_token_generator():
+    """Generates a new Elastic Path token and gets a new one when it expires.
+    """
     env = Env()
     env.read_env()
     ep_client_id = env.str('EP_CLIENT_ID')
@@ -26,7 +28,7 @@ def ep_token_generator():
     generated_at = None
     while True:
         if token is None or datetime.now() - generated_at >= timedelta(hours=1):
-            token = get_access_token(ep_client_id, ep_client_secret)
+            token = get_access_token(ep_client_id, ep_client_secret)['access_token']
             generated_at = datetime.now()
         yield token
 
