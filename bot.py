@@ -9,12 +9,14 @@ from enum import Enum
 from functools import partial
 
 import redis
+import telegram.error
 from environs import Env
 from telegram.ext import Updater, Filters, CallbackContext
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 
-from ep_api import get_all_products, get_product, get_image_url, ep_token_generator, add_item_to_cart, get_cart_items
+from ep_api import (get_all_products, get_product, get_image_url, ep_token_generator,
+                    add_item_to_cart, get_cart_items, delete_cart_item)
 
 _database = None
 ep_token = ep_token_generator()
@@ -58,14 +60,18 @@ def fish_menu(update: Update, context: CallbackContext):
     ]
     keyboard.append([InlineKeyboardButton('Корзина', callback_data='cart')])
     reply_markup = InlineKeyboardMarkup(keyboard)
-    update.effective_chat.send_message(text='Выбери рыбу:', reply_markup=reply_markup)
+    try:
+        update.effective_message.edit_text(text='Выбери рыбу:', reply_markup=reply_markup)
+    except telegram.error.BadRequest:
+        update.effective_chat.send_message(text='Выбери рыбу:', reply_markup=reply_markup)
+        update.effective_message.delete()
     return StateFunction.HANDLE_MENU.name
 
 
 def handle_menu(update: Update, context: CallbackContext):
     update.callback_query.answer()
     if update.callback_query.data == 'cart':
-        return cart(update, context)
+        return show_cart(update, context)
     else:
         return fish_description(update, context)
 
@@ -88,7 +94,7 @@ def fish_description(update: Update, context: CallbackContext):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.effective_chat.send_photo(image_url, caption=description, reply_markup=reply_markup)
-    context.bot.delete_message(chat_id=update.effective_chat.id, message_id=update.effective_message.message_id)
+    update.effective_message.delete()
     return StateFunction.HANDLE_DESCRIPTION.name
 
 
@@ -110,13 +116,20 @@ def handle_description(update: Update, context: CallbackContext):
 
 def handle_cart(update: Update, context: CallbackContext):
     if update.callback_query.data == 'fish_menu':
-        update.effective_message.delete()
         return fish_menu(update, context)
-    # TODO remove items here
-    return cart(update, context)
+    access_token = next(ep_token)
+    delete_cart_item(
+        access_token,
+        customer_id=update.effective_user.id,
+        product_id=update.callback_query.data,
+    )
+    update.callback_query.answer('Товар удален.')
+    return show_cart(update, context)
 
 
 def format_cart_message(cart_items: dict):
+    if not cart_items['data']:
+        return 'Ваша корзина пока пуста.'
     cart_total = cart_items["meta"]["display_price"]["with_tax"]["formatted"]
     message_text = '\n'.join(
         [f'{product["name"]}\n'
@@ -128,7 +141,7 @@ def format_cart_message(cart_items: dict):
     return message_text
 
 
-def cart(update: Update, context: CallbackContext):
+def show_cart(update: Update, context: CallbackContext):
     access_token = next(ep_token)
     cart_items = get_cart_items(access_token, customer_id=update.effective_user.id)
     message_text = format_cart_message(cart_items)
