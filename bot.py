@@ -15,12 +15,10 @@ from telegram.ext import Updater, Filters, CallbackContext
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 
-from ep_api import (get_all_products, get_product, get_image_url, ep_token_generator,
-                    add_item_to_cart, get_cart_items, delete_cart_item,
-                    create_customer)
+from ep_api import ElasticPathClient
 
 _database = None
-ep_token = ep_token_generator()
+ep_client = ElasticPathClient()
 
 
 def get_database_connection():
@@ -53,8 +51,7 @@ def main_menu(update: Update, context: CallbackContext):
 
 def fish_menu(update: Update, context: CallbackContext):
     update.callback_query.answer()
-    access_token = next(ep_token)
-    products = get_all_products(access_token)
+    products = ep_client.get_all_products()
     keyboard = [
         [InlineKeyboardButton(product['attributes']['name'], callback_data=product['id'])]
         for product in products
@@ -81,10 +78,9 @@ def handle_menu(update: Update, context: CallbackContext):
 def fish_description(update: Update, context: CallbackContext):
     update.callback_query.answer()
     choice = update.callback_query.data
-    access_token = next(ep_token)
-    product = get_product(access_token, product_id=choice)
+    product = ep_client.get_product(product_id=choice)
     image_id = product['relationships']['main_image']['data']['id']
-    image_url = get_image_url(access_token, image_id=image_id)
+    image_url = ep_client.get_image_url(image_id=image_id)
     description = (f'{product["attributes"]["name"]}\n\n'
                    f'{product["attributes"]["description"]}')
     keyboard = [
@@ -105,9 +101,7 @@ def handle_description(update: Update, context: CallbackContext):
     if choice == 'fish_menu':
         return fish_menu(update, context)
     product_id, quantity = choice.split(':')
-    access_token = next(ep_token)
-    add_item_to_cart(
-        access_token=access_token,
+    ep_client.add_item_to_cart(
         customer_id=update.effective_user.id,
         product_id=product_id,
         quantity=quantity,
@@ -121,9 +115,7 @@ def handle_cart(update: Update, context: CallbackContext):
         return fish_menu(update, context)
     elif update.callback_query.data == 'pay':
         return handle_payment(update, context)
-    access_token = next(ep_token)
-    delete_cart_item(
-        access_token,
+    ep_client.delete_cart_item(
         customer_id=update.effective_user.id,
         product_id=update.callback_query.data,
     )
@@ -146,8 +138,7 @@ def format_cart_message(cart_items: dict):
 
 
 def show_cart(update: Update, context: CallbackContext):
-    access_token = next(ep_token)
-    cart_items = get_cart_items(access_token, customer_id=update.effective_user.id)
+    cart_items = ep_client.get_cart_items(customer_id=update.effective_user.id)
     message_text = format_cart_message(cart_items)
     keyboard = [
         [InlineKeyboardButton(f'Убрать {product["name"]}', callback_data=product['id'])]
@@ -184,9 +175,7 @@ def handle_email(update: Update, context: CallbackContext):
 def confirm_email(update: Update, context: CallbackContext):
     if update.callback_query.data == 'reenter_email':
         return handle_payment(update, context)
-    access_token = next(ep_token)
-    create_customer(
-        access_token,
+    ep_client.create_customer(
         full_name=update.effective_user.full_name,
         email=update.callback_query.data
     )
