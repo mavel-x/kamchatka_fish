@@ -9,6 +9,7 @@ from enum import Enum
 from functools import partial
 
 import redis
+import requests.exceptions
 import telegram.error
 from environs import Env
 from telegram.ext import Updater, Filters, CallbackContext
@@ -75,12 +76,20 @@ def handle_menu(update: Update, context: CallbackContext):
         return fish_description(update, context)
 
 
+def get_product_image(product: dict):
+    image_id = product['relationships']['main_image']['data']['id']
+    try:
+        image_url = ep_client.get_image_url(image_id=image_id)
+    except requests.exceptions.HTTPError:
+        image_url = 'https://i.ytimg.com/vi/1I0BXMwwti4/maxresdefault.jpg'
+    return image_url
+
+
 def fish_description(update: Update, context: CallbackContext):
     update.callback_query.answer()
     choice = update.callback_query.data
     product = ep_client.get_product(product_id=choice)
-    image_id = product['relationships']['main_image']['data']['id']
-    image_url = ep_client.get_image_url(image_id=image_id)
+    image_url = get_product_image(product)
     description = (f'{product["attributes"]["name"]}\n\n'
                    f'{product["attributes"]["description"]}')
     keyboard = [
