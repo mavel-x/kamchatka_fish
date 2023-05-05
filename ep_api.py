@@ -1,5 +1,4 @@
-from datetime import datetime, timedelta
-from pprint import pprint
+from datetime import datetime
 from typing import Generator
 
 import requests
@@ -26,18 +25,18 @@ class ElasticPathClient:
         }
         response = requests.post(access_url, data=data)
         response.raise_for_status()
-        pprint(response.json())
         return response.json()
 
     def _token_generator(self, ep_client_id, ep_client_secret):
         """Generates a new Elastic Path token and automatically refreshes it on expiration.
         """
         token = None
-        generated_at = None
+        expires_at = None
         while True:
-            if token is None or datetime.now() - generated_at >= timedelta(hours=1):
-                token = self._get_access_token(ep_client_id, ep_client_secret)['access_token']
-                generated_at = datetime.now()
+            if token is None or datetime.now() > expires_at:
+                token_response = self._get_access_token(ep_client_id, ep_client_secret)
+                token = token_response['access_token']
+                expires_at = datetime.fromtimestamp(token_response['expires'])
             yield token
 
     def get_all_products(self):
