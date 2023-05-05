@@ -16,7 +16,8 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 
 from ep_api import (get_all_products, get_product, get_image_url, ep_token_generator,
-                    add_item_to_cart, get_cart_items, delete_cart_item)
+                    add_item_to_cart, get_cart_items, delete_cart_item,
+                    create_customer)
 
 _database = None
 ep_token = ep_token_generator()
@@ -60,10 +61,11 @@ def fish_menu(update: Update, context: CallbackContext):
     ]
     keyboard.append([InlineKeyboardButton('Корзина', callback_data='cart')])
     reply_markup = InlineKeyboardMarkup(keyboard)
+    message_text = 'Выберите рыбу:'
     try:
-        update.effective_message.edit_text(text='Выбери рыбу:', reply_markup=reply_markup)
+        update.effective_message.edit_text(message_text, reply_markup=reply_markup)
     except telegram.error.BadRequest:
-        update.effective_chat.send_message(text='Выбери рыбу:', reply_markup=reply_markup)
+        update.effective_chat.send_message(message_text, reply_markup=reply_markup)
         update.effective_message.delete()
     return StateFunction.HANDLE_MENU.name
 
@@ -117,6 +119,8 @@ def handle_description(update: Update, context: CallbackContext):
 def handle_cart(update: Update, context: CallbackContext):
     if update.callback_query.data == 'fish_menu':
         return fish_menu(update, context)
+    elif update.callback_query.data == 'pay':
+        return handle_payment(update, context)
     access_token = next(ep_token)
     delete_cart_item(
         access_token,
@@ -149,10 +153,54 @@ def show_cart(update: Update, context: CallbackContext):
         [InlineKeyboardButton(f'Убрать {product["name"]}', callback_data=product['id'])]
         for product in cart_items['data']
     ]
+    if cart_items['data']:
+        keyboard.append([InlineKeyboardButton('Оплатить заказ', callback_data='pay')])
     keyboard.append([InlineKeyboardButton('Обратно в меню', callback_data='fish_menu')])
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.effective_message.edit_text(message_text, reply_markup=reply_markup)
     return StateFunction.HANDLE_CART.name
+
+
+def handle_payment(update: Update, context: CallbackContext):
+    update.callback_query.answer()
+    message_text = 'Пожалуйста, пришлите мне ваш контактный имейл.'
+    update.effective_message.edit_text(message_text, reply_markup=None)
+    return StateFunction.WAIT_EMAIL.name
+
+
+def handle_email(update: Update, context: CallbackContext):
+    email = update.message.text
+    # TODO validate email
+    message_text = f'Ваш имейл: {email}. Всё верно?'
+    keyboard = [
+        [InlineKeyboardButton('Да', callback_data=email)],
+        [InlineKeyboardButton('Нет', callback_data='reenter_email')],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    update.effective_chat.send_message(message_text, reply_markup=reply_markup)
+    return StateFunction.CONFIRM_EMAIL.name
+
+
+def confirm_email(update: Update, context: CallbackContext):
+    if update.callback_query.data == 'reenter_email':
+        return handle_payment(update, context)
+    access_token = next(ep_token)
+    create_customer(
+        access_token,
+        full_name=update.effective_user.full_name,
+        email=update.callback_query.data
+    )
+    return confirm_payment(update, context)
+
+
+def confirm_payment(update: Update, context: CallbackContext):
+    update.callback_query.answer()
+    message_text = 'Спасибо! С вами свяжутся для завершения оплаты.'
+    reply_markup = InlineKeyboardMarkup.from_button(
+        InlineKeyboardButton('Обратно в меню', callback_data='fish_menu')
+    )
+    update.effective_message.edit_text(message_text, reply_markup=reply_markup)
+    return StateFunction.MAIN_MENU.name
 
 
 class StateFunction(Enum):
@@ -161,6 +209,8 @@ class StateFunction(Enum):
     HANDLE_MENU = partial(handle_menu)
     HANDLE_DESCRIPTION = partial(handle_description)
     HANDLE_CART = partial(handle_cart)
+    WAIT_EMAIL = partial(handle_email)
+    CONFIRM_EMAIL = partial(confirm_email)
 
 
 def handle_users_reply(update: Update, context: CallbackContext):
