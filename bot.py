@@ -123,7 +123,7 @@ def handle_cart(update: Update, context: CallbackContext):
     return show_cart(update, context)
 
 
-def format_cart_message(cart_items: dict):
+def create_cart_message(cart_items: dict):
     if not cart_items['data']:
         return 'Ваша корзина пока пуста.'
     cart_total = cart_items["meta"]["display_price"]["with_tax"]["formatted"]
@@ -139,7 +139,8 @@ def format_cart_message(cart_items: dict):
 
 def show_cart(update: Update, context: CallbackContext):
     cart_items = ep_client.get_cart_items(customer_id=update.effective_user.id)
-    message_text = format_cart_message(cart_items)
+    message_text = create_cart_message(cart_items)
+
     keyboard = [
         [InlineKeyboardButton(f'Убрать {product["name"]}', callback_data=product['id'])]
         for product in cart_items['data']
@@ -148,6 +149,7 @@ def show_cart(update: Update, context: CallbackContext):
         keyboard.append([InlineKeyboardButton('Оплатить заказ', callback_data='pay')])
     keyboard.append([InlineKeyboardButton('Обратно в меню', callback_data='fish_menu')])
     reply_markup = InlineKeyboardMarkup(keyboard)
+
     update.effective_message.edit_text(message_text, reply_markup=reply_markup)
     return StateFunction.HANDLE_CART.name
 

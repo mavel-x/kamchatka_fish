@@ -31,12 +31,12 @@ class ElasticPathClient:
         """Generates a new Elastic Path token and automatically refreshes it on expiration.
         """
         token = None
-        expires_at = None
+        expires_at = 0
         while True:
-            if token is None or datetime.now() > expires_at:
+            if int(datetime.now().timestamp()) > expires_at:
                 token_response = self._get_access_token(ep_client_id, ep_client_secret)
                 token = token_response['access_token']
-                expires_at = datetime.fromtimestamp(token_response['expires'])
+                expires_at = token_response['expires']
             yield token
 
     def get_all_products(self):
