@@ -9,17 +9,15 @@ from enum import Enum
 from functools import partial
 
 import redis
-import requests.exceptions
 import telegram.error
 from environs import Env
 from telegram.ext import Updater, Filters, CallbackContext
-from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
+from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler, Dispatcher
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 
 from ep_api import ElasticPathClient
 
 _database = None
-ep_client = ElasticPathClient()
 
 
 def get_database_connection():
@@ -51,6 +49,7 @@ def main_menu(update: Update, context: CallbackContext):
 
 
 def fish_menu(update: Update, context: CallbackContext):
+    ep_client: ElasticPathClient = context.bot_data['ep_client']
     update.callback_query.answer()
     products = ep_client.get_all_products()
     keyboard = [
@@ -76,20 +75,12 @@ def handle_menu(update: Update, context: CallbackContext):
         return fish_description(update, context)
 
 
-def get_product_image(product: dict):
-    image_id = product['relationships']['main_image']['data']['id']
-    try:
-        image_url = ep_client.get_image_url(image_id=image_id)
-    except requests.exceptions.HTTPError:
-        image_url = 'https://i.ytimg.com/vi/1I0BXMwwti4/maxresdefault.jpg'
-    return image_url
-
-
 def fish_description(update: Update, context: CallbackContext):
+    ep_client: ElasticPathClient = context.bot_data['ep_client']
     update.callback_query.answer()
     choice = update.callback_query.data
     product = ep_client.get_product(product_id=choice)
-    image_url = get_product_image(product)
+    image_url = ep_client.get_product_image(product)
     description = (f'{product["attributes"]["name"]}\n\n'
                    f'{product["attributes"]["description"]}')
     keyboard = [
@@ -106,6 +97,7 @@ def fish_description(update: Update, context: CallbackContext):
 
 
 def handle_description(update: Update, context: CallbackContext):
+    ep_client: ElasticPathClient = context.bot_data['ep_client']
     choice = update.callback_query.data
     if choice == 'fish_menu':
         return fish_menu(update, context)
@@ -120,6 +112,7 @@ def handle_description(update: Update, context: CallbackContext):
 
 
 def handle_cart(update: Update, context: CallbackContext):
+    ep_client: ElasticPathClient = context.bot_data['ep_client']
     if update.callback_query.data == 'fish_menu':
         return fish_menu(update, context)
     elif update.callback_query.data == 'pay':
@@ -147,6 +140,7 @@ def create_cart_message(cart_items: dict):
 
 
 def show_cart(update: Update, context: CallbackContext):
+    ep_client: ElasticPathClient = context.bot_data['ep_client']
     cart_items = ep_client.get_cart_items(customer_id=update.effective_user.id)
     message_text = create_cart_message(cart_items)
 
@@ -184,6 +178,7 @@ def handle_email(update: Update, context: CallbackContext):
 
 
 def confirm_email(update: Update, context: CallbackContext):
+    ep_client: ElasticPathClient = context.bot_data['ep_client']
     if update.callback_query.data == 'reenter_email':
         return handle_payment(update, context)
     ep_client.create_customer(
@@ -250,8 +245,13 @@ def main():
     env = Env()
     env.read_env()
     token = env.str("TELEGRAM_TOKEN")
+    ep_client_id = env.str('EP_CLIENT_ID')
+    ep_client_secret = env.str('EP_SECRET')
+    ep_client = ElasticPathClient(ep_client_id, ep_client_secret)
+    
     updater = Updater(token)
-    dispatcher = updater.dispatcher
+    dispatcher: Dispatcher = updater.dispatcher
+    dispatcher.bot_data.update({'ep_client': ep_client})
     dispatcher.add_handler(CallbackQueryHandler(handle_users_reply))
     dispatcher.add_handler(MessageHandler(Filters.text, handle_users_reply))
     dispatcher.add_handler(CommandHandler('start', handle_users_reply))

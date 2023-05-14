@@ -2,17 +2,12 @@ from datetime import datetime
 from typing import Generator
 
 import requests
-from environs import Env
 
 
 class ElasticPathClient:
     token_generator: Generator
 
-    def __init__(self):
-        env = Env()
-        env.read_env()
-        ep_client_id = env.str('EP_CLIENT_ID')
-        ep_client_secret = env.str('EP_SECRET')
+    def __init__(self, ep_client_id: str, ep_client_secret: str):
         self.token_generator = self._token_generator(ep_client_id, ep_client_secret)
 
     @staticmethod
@@ -57,13 +52,21 @@ class ElasticPathClient:
         product_raw = response.json()
         return product_raw['data']
 
-    def get_image_url(self, image_id):
+    def _get_image_url(self, image_id):
         access_token = next(self.token_generator)
         url = f'https://api.moltin.com/v2/files/{image_id}'
         headers = {'Authorization': f'Bearer {access_token}'}
         response = requests.get(url, headers=headers)
         response.raise_for_status()
         return response.json()['data']['link']['href']
+
+    def get_product_image(self, product: dict):
+        image_id = product['relationships']['main_image']['data']['id']
+        try:
+            image_url = self._get_image_url(image_id=image_id)
+        except requests.exceptions.HTTPError:
+            image_url = 'https://i.ytimg.com/vi/1I0BXMwwti4/maxresdefault.jpg'
+        return image_url
 
     def get_cart_items(self, customer_id):
         access_token = next(self.token_generator)
