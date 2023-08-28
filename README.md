@@ -43,6 +43,3 @@ DATABASE_PORT=...
 Запустите бота из скрипта bot.py.
 Для запуска на сервере вам поможет, например, утилита 
 [screens](https://github.com/python-telegram-bot/python-telegram-bot/wiki/Hosting-your-bot#start-your-bot).
-
-## О проекте
-Это учебный проект для школы Python-разработчиков [dvmn.org](https://dvmn.org).
